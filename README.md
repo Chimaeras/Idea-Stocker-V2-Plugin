@@ -83,7 +83,9 @@ Stocker 是一款强大的 IntelliJ IDEA / JetBrains 全家桶插件，专为需
 
 ## 📦 安装方法
 
-### 方式一：从 JetBrains Marketplace 安装（推荐）
+### 方式一：从 JetBrains Marketplace 安装
+
+- **目前仅仅Stocker(V1)在Marketplace上架，二代增强版请参考方式二手动安装。**
 
 1. 打开 IntelliJ IDEA
 2. 进入 `Settings/Preferences` → `Plugins`
@@ -96,7 +98,7 @@ Stocker 是一款强大的 IntelliJ IDEA / JetBrains 全家桶插件，专为需
 
 ### 方式二：手动安装
 
-1. 从 [Releases](https://github.com/WhiteVermouth/intellij-investor-dashboard/releases) 下载最新版本的 `.zip` 文件
+1. 从 [Releases](https://github.com/Chimaeras/Idea-Stocker-V2-Plugin/releases) 下载最新版本的 `.zip` 文件
 2. 打开 IntelliJ IDEA
 3. 进入 `Settings/Preferences` → `Plugins`
 4. 点击齿轮图标 ⚙️ → `Install Plugin from Disk...`
