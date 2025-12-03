@@ -1,9 +1,11 @@
 package com.vermouthx.stocker.listeners;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.vermouthx.stocker.entities.StockerQuote;
 import com.vermouthx.stocker.utils.StockerTableModelUtil;
 import com.vermouthx.stocker.views.StockerTableView;
 
+import javax.swing.SwingUtilities;
 import javax.swing.table.DefaultTableModel;
 import java.util.List;
 
@@ -32,6 +34,9 @@ import java.util.List;
  * @author VermouthX
  */
 public class StockerQuoteUpdateListener implements StockerQuoteUpdateNotifier {
+    /** 日志记录器 */
+    private static final Logger log = Logger.getInstance(StockerQuoteUpdateListener.class);
+    
     /** 关联的表格视图 */
     private final StockerTableView myTableView;
 
@@ -42,6 +47,7 @@ public class StockerQuoteUpdateListener implements StockerQuoteUpdateNotifier {
      */
     public StockerQuoteUpdateListener(StockerTableView myTableView) {
         this.myTableView = myTableView;
+        log.info("Stocker: StockerQuoteUpdateListener initialized for table view");
     }
 
     /**
@@ -67,16 +73,27 @@ public class StockerQuoteUpdateListener implements StockerQuoteUpdateNotifier {
      */
     @Override
     public void syncQuotes(List<StockerQuote> quotes, int size) {
-        DefaultTableModel tableModel = myTableView.getTableModel();
+        log.info("Stocker: syncQuotes called with " + quotes.size() + " quotes, expected size: " + size);
         
-        // 遍历所有收到的股票行情
-        quotes.forEach(quote -> {
-            // 使用synchronized保证线程安全，避免并发修改表格
-            synchronized (myTableView.getTableModel()) {
+        if (quotes.isEmpty()) {
+            log.warn("Stocker: Received empty quotes list! This may indicate a problem with data fetching or parsing.");
+            return;
+        }
+        
+        // 确保UI更新在EDT线程执行（消息总线可能在后台线程调用此方法）
+        SwingUtilities.invokeLater(() -> {
+            DefaultTableModel tableModel = myTableView.getTableModel();
+            log.info("Stocker: Updating table in EDT thread, current row count: " + tableModel.getRowCount());
+            
+            // 遍历所有收到的股票行情
+            quotes.forEach(quote -> {
+                // 使用synchronized保证线程安全，避免并发修改表格
+                synchronized (myTableView.getTableModel()) {
                 // 查找该股票在表格中的位置
                 int rowIndex = StockerTableModelUtil.existAt(tableModel, quote.getCode());
                 
                 if (rowIndex != -1) {
+                    log.debug("Stocker: Updating existing row for " + quote.getCode());
                     // === 股票已存在：增量更新变化的字段 ===
                     
                     // 更新股票名称（索引1）
@@ -149,8 +166,18 @@ public class StockerQuoteUpdateListener implements StockerQuoteUpdateNotifier {
                     myTableView.updateSummaryRowPublic();
                 } else {
                     // === 股票不存在：添加新行 ===
-                    // 只在初始加载时添加（quotes数量等于预期数量时）
-                    if (quotes.size() == size) {
+                    // 如果表格为空，总是添加（初始加载）
+                    // 如果表格不为空但接近预期数量，也添加（允许少量缺失）
+                    boolean isInitialLoad = tableModel.getRowCount() == 0;
+                    boolean isNearExpected = quotes.size() >= size * 0.9 && quotes.size() <= size;
+                    boolean shouldAdd = isInitialLoad || isNearExpected;
+                    
+                    if (shouldAdd) {
+                        log.info("Stocker: Adding new row for " + quote.getCode() + 
+                                " (table rows: " + tableModel.getRowCount() + 
+                                ", quotes: " + quotes.size() + 
+                                ", expected: " + size + 
+                                ", isInitial: " + isInitialLoad + ")");
                         // 读取持久化的成本价和持仓数量
                         String cost = com.vermouthx.stocker.settings.StockerSetting.Companion.getInstance().getCost(quote.getCode());
                         String qty = com.vermouthx.stocker.settings.StockerSetting.Companion.getInstance().getQuantity(quote.getCode());
@@ -178,9 +205,14 @@ public class StockerQuoteUpdateListener implements StockerQuoteUpdateNotifier {
                         
                         // 添加新行后刷新汇总行
                         myTableView.updateSummaryRowPublic();
+                    } else {
+                        log.debug("Stocker: Skipping add for " + quote.getCode() + " (table rows: " + tableModel.getRowCount() + ", quotes: " + quotes.size() + ", expected: " + size + ")");
                     }
                 }
             }
+            });
+            
+            log.info("Stocker: Table update completed, final row count: " + tableModel.getRowCount());
         });
     }
 
@@ -194,10 +226,13 @@ public class StockerQuoteUpdateListener implements StockerQuoteUpdateNotifier {
      */
     @Override
     public void syncIndices(List<StockerQuote> indices) {
-        // 使用synchronized保证线程安全
-        synchronized (myTableView) {
-            myTableView.syncIndices(indices);
-        }
+        // 确保UI更新在EDT线程执行
+        SwingUtilities.invokeLater(() -> {
+            // 使用synchronized保证线程安全
+            synchronized (myTableView) {
+                myTableView.syncIndices(indices);
+            }
+        });
     }
 
 }

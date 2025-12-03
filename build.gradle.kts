@@ -34,6 +34,9 @@ repositories {
 
 dependencies {
     implementation("org.apache.commons:commons-text:1.12.0")
+    // Apache HttpClient for HTTP requests
+    implementation("org.apache.httpcomponents:httpclient:4.5.14")
+    implementation("org.apache.httpcomponents:httpcore:4.4.16")
     intellijPlatform {
         val localPath = project.findProperty("platformLocalPath")?.toString()?.trim()
         if (!localPath.isNullOrEmpty()) {

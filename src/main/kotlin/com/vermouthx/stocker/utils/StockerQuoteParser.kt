@@ -31,15 +31,123 @@ import kotlin.math.roundToInt
 object StockerQuoteParser {
 
     /**
-     * Double扩展函数：保留两位小数
+     * 安全地解析Double值，避免NaN和无效值
+     * 
+     * 处理各种无效输入情况：
+     * - 空字符串 -> 返回默认值
+     * - "--" 或 "-" -> 返回默认值
+     * - 非数字字符串 -> 返回默认值
+     * - 已经是NaN或Infinity的值 -> 返回默认值
+     * 
+     * @param value 待解析的字符串
+     * @param default 解析失败时的默认值，默认为0.0
+     * @return 解析后的Double值，失败时返回默认值
+     */
+    private fun String.safeToDouble(default: Double = 0.0): Double {
+        return try {
+            // 检查空字符串和常见的无效值
+            val trimmed = this.trim()
+            if (trimmed.isBlank() || trimmed == "--" || trimmed == "-" || trimmed == "N/A" || trimmed == "null") {
+                return default
+            }
+            
+            val result = trimmed.toDouble()
+            
+            // 检查是否为NaN或Infinity
+            if (result.isNaN() || result.isInfinite()) {
+                default
+            } else {
+                result
+            }
+        } catch (e: NumberFormatException) {
+            default
+        }
+    }
+
+    /**
+     * Double扩展函数：保留两位小数，并处理NaN
      * 
      * 通过四舍五入将Double值格式化为保留两位小数。
-     * 用于价格、涨跌额、涨跌幅等需要精确显示的数值。
+     * 如果值是NaN或Infinity，返回0.0。
      * 
+     * 注意：此方法已废弃，请使用 safeTwoDigits() 方法
+     * 
+     * @return 保留两位小数的Double值，NaN/Infinity时返回0.0
+     */
+    @Deprecated("Use safeTwoDigits() instead", ReplaceWith("this.safeTwoDigits()"))
+    private fun Double.twoDigits(): Double {
+        // 双重检查NaN和Infinity，确保安全
+        if (!this.isFinite() || this.isNaN() || this.isInfinite()) {
+            return 0.0
+        }
+        try {
+            // 再次检查，防止在计算过程中产生NaN
+            val multiplied = this * 100.0
+            if (!multiplied.isFinite() || multiplied.isNaN() || multiplied.isInfinite()) {
+                return 0.0
+            }
+            val rounded = multiplied.roundToInt()
+            val result = rounded / 100.0
+            // 最终检查结果
+            if (!result.isFinite() || result.isNaN() || result.isInfinite()) {
+                return 0.0
+            }
+            return result
+        } catch (e: Exception) {
+            // 捕获任何可能的异常（包括IllegalArgumentException）
+            return 0.0
+        }
+    }
+    
+    /**
+     * 安全的Double扩展函数：保留两位小数，处理NaN
+     * 
+     * 如果值是NaN或Infinity，返回默认值。
+     * 使用双重检查和异常捕获，确保不会在roundToInt时抛出异常。
+     * 
+     * @param default NaN/Infinity时返回的默认值
      * @return 保留两位小数的Double值
      */
-    private fun Double.twoDigits(): Double {
-        return (this * 100.0).roundToInt() / 100.0
+    private fun Double.safeTwoDigits(default: Double = 0.0): Double {
+        // 双重检查NaN和Infinity，确保安全
+        if (!this.isFinite() || this.isNaN() || this.isInfinite()) {
+            return default
+        }
+        try {
+            // 再次检查，防止在计算过程中产生NaN
+            val multiplied = this * 100.0
+            if (!multiplied.isFinite() || multiplied.isNaN() || multiplied.isInfinite()) {
+                return default
+            }
+            val rounded = multiplied.roundToInt()
+            val result = rounded / 100.0
+            // 最终检查结果
+            if (!result.isFinite() || result.isNaN() || result.isInfinite()) {
+                return default
+            }
+            return result
+        } catch (e: Exception) {
+            // 捕获任何可能的异常（包括IllegalArgumentException: Cannot round NaN value）
+            return default
+        }
+    }
+    
+    /**
+     * 验证StockerQuote数据有效性
+     * 
+     * 检查关键字段是否为NaN或无效值。
+     * 
+     * @param quote 待验证的行情数据
+     * @return true表示数据有效，false表示数据无效应被过滤
+     */
+    private fun validateQuote(quote: StockerQuote): Boolean {
+        return !quote.current.isNaN() 
+            && !quote.current.isInfinite()
+            && !quote.percentage.isNaN()
+            && !quote.percentage.isInfinite()
+            && quote.current > 0  // 当前价格应该大于0
+            && quote.name.isNotBlank()
+            && quote.code.isNotBlank()
     }
 
     /**
@@ -110,15 +218,29 @@ object StockerQuoteParser {
                         
                         val code = textArray[0].uppercase()              // 股票代码转大写
                         val name = textArray[1]                          // 股票名称
-                        val opening = textArray[2].toDouble()            // 今日开盘价
-                        val close = textArray[3].toDouble()              // 昨日收盘价
-                        val current = textArray[4].toDouble()            // 当前价格
-                        val high = textArray[5].toDouble()               // 今日最高价
-                        val low = textArray[6].toDouble()                // 今日最低价
-                        val change = (current - close).twoDigits()       // 涨跌额 = 现价 - 昨收
-                        val percentage = ((current - close) / close * 100).twoDigits()  // 涨跌幅%
+                        val opening = textArray[2].safeToDouble()        // 今日开盘价
+                        val close = textArray[3].safeToDouble()          // 昨日收盘价
+                        val current = textArray[4].safeToDouble()        // 当前价格
+                        val high = textArray[5].safeToDouble()           // 今日最高价
+                        val low = textArray[6].safeToDouble()            // 今日最低价
+                        
+                        // 在计算前验证所有值的有效性
+                        if (!current.isFinite() || !close.isFinite() || 
+                            current.isNaN() || close.isNaN() ||
+                            current.isInfinite() || close.isInfinite()) {
+                            return@mapNotNull null  // 数据无效，跳过这条记录
+                        }
+                        
+                        val change = (current - close).safeTwoDigits()   // 涨跌额 = 现价 - 昨收
+                        // 避免除零：如果昨收价为0，涨跌幅设为0
+                        val percentage = if (close != 0.0 && close.isFinite() && current.isFinite()) {
+                            ((current - close) / close * 100).safeTwoDigits()
+                        } else {
+                            0.0
+                        }
                         val updateAt = textArray[31] + " " + textArray[32]  // 更新时间：日期 + 时间
-                        StockerQuote(
+                        
+                        val quote = StockerQuote(
                             code = code,
                             name = name,
                             current = current,
@@ -130,6 +252,9 @@ object StockerQuoteParser {
                             percentage = percentage,
                             updateAt = updateAt
                         )
+                        
+                        // 验证数据有效性，无效数据返回null被过滤
+                        if (validateQuote(quote)) quote else null
                     }
 
                     StockerMarketType.HKStocks -> {
@@ -141,20 +266,30 @@ object StockerQuoteParser {
                         
                         val code = textArray[0].substring(2).uppercase()  // 去掉前缀"hk"，提取股票代码
                         val name = textArray[2]                           // 股票名称
-                        val opening = textArray[3].toDouble()             // 今日开盘价
-                        val close = textArray[4].toDouble()               // 昨日收盘价
-                        val high = textArray[5].toDouble()                // 今日最高价
-                        val low = textArray[6].toDouble()                 // 今日最低价
-                        val current = textArray[7].toDouble()             // 当前价格
-                        val change = (current - close).twoDigits()        // 涨跌额
-                        val percentage = textArray[9].toDouble().twoDigits()  // 涨跌幅（已计算好）
+                        val opening = textArray[3].safeToDouble()         // 今日开盘价
+                        val close = textArray[4].safeToDouble()           // 昨日收盘价
+                        val high = textArray[5].safeToDouble()            // 今日最高价
+                        val low = textArray[6].safeToDouble()             // 今日最低价
+                        val current = textArray[7].safeToDouble()         // 当前价格
+                        val percentageRaw = textArray[9].safeToDouble()   // 涨跌幅（已计算好）
+                        
+                        // 在计算前验证所有值的有效性
+                        if (!current.isFinite() || !close.isFinite() || !percentageRaw.isFinite() ||
+                            current.isNaN() || close.isNaN() || percentageRaw.isNaN() ||
+                            current.isInfinite() || close.isInfinite() || percentageRaw.isInfinite()) {
+                            return@mapNotNull null  // 数据无效，跳过这条记录
+                        }
+                        
+                        val change = (current - close).safeTwoDigits()    // 涨跌额
+                        val percentage = percentageRaw.safeTwoDigits()     // 涨跌幅
                         
                         // 时间格式转换：yyyy/MM/dd HH:mm -> yyyy-MM-dd HH:mm:ss
                         val sourceFormatter = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm")
                         val targetFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
                         val datetime = LocalDateTime.parse(textArray[18] + " " + textArray[19], sourceFormatter)
                         val updateAt = targetFormatter.format(datetime)
-                        StockerQuote(
+                        
+                        val quote = StockerQuote(
                             code = code,
                             name = name,
                             current = current,
@@ -166,6 +301,9 @@ object StockerQuoteParser {
                             percentage = percentage,
                             updateAt = updateAt
                         )
+                        
+                        // 验证数据有效性
+                        if (validateQuote(quote)) quote else null
                     }
 
                     StockerMarketType.USStocks -> {
@@ -177,15 +315,25 @@ object StockerQuoteParser {
                         
                         val code = textArray[0].substring(3).uppercase()  // 去掉前缀"gb_"，提取股票代码
                         val name = textArray[1]                           // 股票名称
-                        val current = textArray[2].toDouble()             // 当前价格
+                        val current = textArray[2].safeToDouble()         // 当前价格
                         val updateAt = textArray[4]                       // 更新时间（已格式化）
-                        val opening = textArray[6].toDouble()             // 今日开盘价
-                        val high = textArray[7].toDouble()                // 今日最高价
-                        val low = textArray[8].toDouble()                 // 今日最低价
-                        val close = textArray[27].toDouble()              // 昨日收盘价
-                        val change = (current - close).twoDigits()        // 涨跌额
-                        val percentage = textArray[3].toDouble().twoDigits()  // 涨跌幅（已计算好）
-                        StockerQuote(
+                        val opening = textArray[6].safeToDouble()         // 今日开盘价
+                        val high = textArray[7].safeToDouble()            // 今日最高价
+                        val low = textArray[8].safeToDouble()             // 今日最低价
+                        val close = textArray[27].safeToDouble()          // 昨日收盘价
+                        val percentageRaw = textArray[3].safeToDouble()   // 涨跌幅（已计算好）
+                        
+                        // 在计算前验证所有值的有效性
+                        if (!current.isFinite() || !close.isFinite() || !percentageRaw.isFinite() ||
+                            current.isNaN() || close.isNaN() || percentageRaw.isNaN() ||
+                            current.isInfinite() || close.isInfinite() || percentageRaw.isInfinite()) {
+                            return@mapNotNull null  // 数据无效，跳过这条记录
+                        }
+                        
+                        val change = (current - close).safeTwoDigits()    // 涨跌额
+                        val percentage = percentageRaw.safeTwoDigits()     // 涨跌幅
+                        
+                        val quote = StockerQuote(
                             code = code,
                             name = name,
                             current = current,
@@ -197,6 +345,9 @@ object StockerQuoteParser {
                             percentage = percentage,
                             updateAt = updateAt
                         )
+                        
+                        // 验证数据有效性
+                        if (validateQuote(quote)) quote else null
                     }
 
                     StockerMarketType.Crypto -> {
@@ -209,14 +360,28 @@ object StockerQuoteParser {
                         
                         val code = textArray[0].substring(4).uppercase()  // 去掉前缀"btc_"，提取代码
                         val name = textArray[10]                          // 加密货币名称
-                        val current = textArray[9].toDouble()             // 当前价格
-                        val low = textArray[8].toDouble()                 // 今日最低价
-                        val high = textArray[7].toDouble()                // 今日最高价
-                        val opening = textArray[6].toDouble()             // 今日开盘价
-                        val change = (current - opening).twoDigits()      // 涨跌额（相对开盘价）
-                        val percentage = ((current - opening) / opening * 100).twoDigits()  // 涨跌幅
+                        val current = textArray[9].safeToDouble()         // 当前价格
+                        val low = textArray[8].safeToDouble()             // 今日最低价
+                        val high = textArray[7].safeToDouble()            // 今日最高价
+                        val opening = textArray[6].safeToDouble()         // 今日开盘价
+                        
+                        // 在计算前验证所有值的有效性
+                        if (!current.isFinite() || !opening.isFinite() ||
+                            current.isNaN() || opening.isNaN() ||
+                            current.isInfinite() || opening.isInfinite()) {
+                            return@mapNotNull null  // 数据无效，跳过这条记录
+                        }
+                        
+                        val change = (current - opening).safeTwoDigits()  // 涨跌额（相对开盘价）
+                        // 避免除零：如果开盘价为0，涨跌幅设为0
+                        val percentage = if (opening != 0.0 && opening.isFinite() && current.isFinite()) {
+                            ((current - opening) / opening * 100).safeTwoDigits()
+                        } else {
+                            0.0
+                        }
                         val updateAt = "${textArray[12]} ${textArray[1]}" // 更新时间：日期 + 时间
-                        StockerQuote(
+                        
+                        val quote = StockerQuote(
                             code = code,
                             name = name,
                             current = current,
@@ -228,6 +393,9 @@ object StockerQuoteParser {
                             percentage = percentage,
                             updateAt = updateAt
                         )
+                        
+                        // 验证数据有效性
+                        if (validateQuote(quote)) quote else null
                     }
                 }
             } catch (e: Exception) {
@@ -301,13 +469,22 @@ object StockerQuoteParser {
             try {
                 val code = textArray[0].uppercase()              // 股票代码
                 val name = textArray[2]                          // 股票名称
-                val opening = textArray[6].toDouble()            // 今日开盘价
-                val close = textArray[5].toDouble()              // 昨日收盘价
-                val current = textArray[4].toDouble()            // 当前价格
-                val high = textArray[34].toDouble()              // 今日最高价
-                val low = textArray[35].toDouble()               // 今日最低价
-                val change = (current - close).twoDigits()       // 涨跌额
-                val percentage = textArray[33].toDouble().twoDigits()  // 涨跌幅
+                val opening = textArray[6].safeToDouble()        // 今日开盘价
+                val close = textArray[5].safeToDouble()          // 昨日收盘价
+                val current = textArray[4].safeToDouble()        // 当前价格
+                val high = textArray[34].safeToDouble()          // 今日最高价
+                val low = textArray[35].safeToDouble()           // 今日最低价
+                val percentageRaw = textArray[33].safeToDouble() // 涨跌幅
+                
+                // 在计算前验证所有值的有效性
+                if (!current.isFinite() || !close.isFinite() || !percentageRaw.isFinite() ||
+                    current.isNaN() || close.isNaN() || percentageRaw.isNaN() ||
+                    current.isInfinite() || close.isInfinite() || percentageRaw.isInfinite()) {
+                    return@mapNotNull null  // 数据无效，跳过这条记录
+                }
+                
+                val change = (current - close).safeTwoDigits()   // 涨跌额
+                val percentage = percentageRaw.safeTwoDigits()    // 涨跌幅
                 
                 // 根据不同市场类型格式化更新时间
                 val updateAt = when (marketType) {
@@ -330,7 +507,7 @@ object StockerQuoteParser {
                     StockerMarketType.USStocks -> textArray[31]  // 美股时间已经是标准格式
                     StockerMarketType.Crypto -> ""               // 加密货币暂不支持
                 }
-                StockerQuote(
+                val quote = StockerQuote(
                     code = code,
                     name = name,
                     current = current,
@@ -342,6 +519,9 @@ object StockerQuoteParser {
                     percentage = percentage,
                     updateAt = updateAt
                 )
+                
+                // 验证数据有效性
+                if (validateQuote(quote)) quote else null
             } catch (e: Exception) {
                 null
             }

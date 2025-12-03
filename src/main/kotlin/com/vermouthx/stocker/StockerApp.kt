@@ -1,6 +1,7 @@
 package com.vermouthx.stocker
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.Logger
 import com.vermouthx.stocker.enums.StockerMarketIndex
 import com.vermouthx.stocker.enums.StockerMarketType
 import com.vermouthx.stocker.listeners.StockerQuoteReloadNotifier.*
@@ -37,6 +38,9 @@ import java.util.concurrent.TimeUnit
  * @author VermouthX
  */
 class StockerApp {
+
+    /** 日志记录器 */
+    private val log = Logger.getInstance(javaClass)
 
     /** 应用设置实例 */
     private val setting = StockerSetting.instance
@@ -193,31 +197,55 @@ class StockerApp {
      */
     private fun createAllQuoteUpdateThread(): Runnable {
         return Runnable {
-            // 获取当前设置的数据提供商
-            val quoteProvider = setting.quoteProvider
-            
-            // 批量获取所有市场的股票行情
-            // 使用flatten()将多个列表合并为一个列表
-            val allStockQuotes = listOf(
-                StockerQuoteHttpUtil.get(StockerMarketType.AShare, quoteProvider, setting.aShareList),
-                StockerQuoteHttpUtil.get(StockerMarketType.HKStocks, quoteProvider, setting.hkStocksList),
-                StockerQuoteHttpUtil.get(StockerMarketType.USStocks, quoteProvider, setting.usStocksList),
-                // 加密货币暂时注释，可按需启用
-                // StockerQuoteHttpUtil.get(StockerMarketType.Crypto, quoteProvider, setting.cryptoList)
-            ).flatten()
-            
-            // 批量获取所有市场的指数行情
-            val allStockIndices = listOf(
-                StockerQuoteHttpUtil.get(StockerMarketType.AShare, quoteProvider, StockerMarketIndex.CN.codes),
-                StockerQuoteHttpUtil.get(StockerMarketType.HKStocks, quoteProvider, StockerMarketIndex.HK.codes),
-                StockerQuoteHttpUtil.get(StockerMarketType.USStocks, quoteProvider, StockerMarketIndex.US.codes),
-                // StockerQuoteHttpUtil.get(StockerMarketType.Crypto, quoteProvider, StockerMarketIndex.Crypto.codes)
-            ).flatten()
-            
-            // 发布数据更新事件到消息总线
-            val publisher = messageBus.syncPublisher(STOCK_ALL_QUOTE_UPDATE_TOPIC)
-            publisher.syncQuotes(allStockQuotes, setting.allStockListSize)  // 发布股票行情
-            publisher.syncIndices(allStockIndices)  // 发布指数行情
+            try {
+                // 获取当前设置的数据提供商
+                val quoteProvider = setting.quoteProvider
+                log.info("Stocker: Starting quote update, provider: ${quoteProvider.title}")
+                
+                // 批量获取所有市场的股票行情
+                // 使用flatten()将多个列表合并为一个列表
+                val aShareQuotes = StockerQuoteHttpUtil.get(StockerMarketType.AShare, quoteProvider, setting.aShareList)
+                val hkQuotes = StockerQuoteHttpUtil.get(StockerMarketType.HKStocks, quoteProvider, setting.hkStocksList)
+                val usQuotes = StockerQuoteHttpUtil.get(StockerMarketType.USStocks, quoteProvider, setting.usStocksList)
+                
+                log.info("Stocker: Fetched quotes - A股: ${aShareQuotes.size}, 港股: ${hkQuotes.size}, 美股: ${usQuotes.size}")
+                
+                val allStockQuotes = listOf(
+                    aShareQuotes,
+                    hkQuotes,
+                    usQuotes,
+                    // 加密货币暂时注释，可按需启用
+                    // StockerQuoteHttpUtil.get(StockerMarketType.Crypto, quoteProvider, setting.cryptoList)
+                ).flatten()
+                
+                log.info("Stocker: Total stock quotes fetched: ${allStockQuotes.size}, expected: ${setting.allStockListSize}")
+                
+                // 批量获取所有市场的指数行情
+                val aShareIndices = StockerQuoteHttpUtil.get(StockerMarketType.AShare, quoteProvider, StockerMarketIndex.CN.codes)
+                val hkIndices = StockerQuoteHttpUtil.get(StockerMarketType.HKStocks, quoteProvider, StockerMarketIndex.HK.codes)
+                val usIndices = StockerQuoteHttpUtil.get(StockerMarketType.USStocks, quoteProvider, StockerMarketIndex.US.codes)
+                
+                log.info("Stocker: Fetched indices - A股: ${aShareIndices.size}, 港股: ${hkIndices.size}, 美股: ${usIndices.size}")
+                
+                val allStockIndices = listOf(
+                    aShareIndices,
+                    hkIndices,
+                    usIndices,
+                    // StockerQuoteHttpUtil.get(StockerMarketType.Crypto, quoteProvider, StockerMarketIndex.Crypto.codes)
+                ).flatten()
+                
+                log.info("Stocker: Total indices fetched: ${allStockIndices.size}")
+                
+                // 发布数据更新事件到消息总线
+                val publisher = messageBus.syncPublisher(STOCK_ALL_QUOTE_UPDATE_TOPIC)
+                log.info("Stocker: Publishing quotes to message bus, quotes count: ${allStockQuotes.size}")
+                publisher.syncQuotes(allStockQuotes, setting.allStockListSize)  // 发布股票行情
+                log.info("Stocker: Publishing indices to message bus, indices count: ${allStockIndices.size}")
+                publisher.syncIndices(allStockIndices)  // 发布指数行情
+                log.info("Stocker: Quote update completed successfully")
+            } catch (e: Exception) {
+                log.error("Stocker: Error in quote update thread", e)
+            }
         }
     }
 
